@@ -11,7 +11,6 @@ import (
 var importServer string = "0.0.0.0:19000"
 var toServer string = "192.168.1.12:9000"
 
-// 纯 54321 端口透明代理
 func main() {
 	// 监听端口
 	ln, err := net.Listen("tcp", importServer)
@@ -36,7 +35,7 @@ func main() {
 }
 
 func handleConnection(conn net.Conn) {
-	fmt.Println("客户端进来了")
+	fmt.Println("接受客户端链接 ok")
 	// 确保连接关闭
 	defer conn.Close()
 
@@ -52,12 +51,15 @@ func handleConnection(conn net.Conn) {
 		fmt.Println("建立TCP连接出错:", err)
 		return
 	}
-	fmt.Println("服务器连上了")
+	fmt.Println("到服务器建链 ok")
 	// 确保连接关闭
 	defer serverConn.Close()
 
 	// 把两边数据对接上
 	err = Transport(serverConn, conn)
+	if err == nil {
+		fmt.Println("链接正常断开")
+	}
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -96,7 +98,8 @@ func Transport(rw1, rw2 io.ReadWriter) error {
 		errc <- err
 	}()
 
-	if err := <-errc; err != nil && err != io.EOF {
+	err := <-errc
+	if err != nil && err != io.EOF {
 		return err
 	}
 	return nil
