@@ -1,2 +1,4 @@
 build.bat
 TCPTransparentProxy
+go.mod
+go.sum

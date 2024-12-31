@@ -3,38 +3,65 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"os"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
-// 从哪里代理到哪里
-var importServer string = "0.0.0.0:19000"
-var toServer string = "192.168.1.12:9000"
-
-func main() {
-	// 监听端口
-	ln, err := net.Listen("tcp", importServer)
-	if err != nil {
-		fmt.Println("监听端口出错:", err)
-		return
-	}
-	// 确保监听端口关闭
-	defer ln.Close()
-
-	fmt.Println("服务器已启动，正在监听" + importServer)
-	for {
-		// 接受客户端连接
-		conn, err := ln.Accept()
-		if err != nil {
-			fmt.Println("接受客户端连接出错:", err)
-			continue
-		}
-		// 处理客户端连接
-		go handleConnection(conn)
+type Tconfig struct {
+	Proxy []struct {
+		From string `yaml:"from"`
+		To   string `yaml:"to"`
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func main() {
+	// 读取配置文件
+	confContent, err := os.ReadFile("./config.yml")
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	confOb := Tconfig{}
+	err = yaml.Unmarshal([]byte(confContent), &confOb)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	// 启动每一组代理
+	for x := 0; x < len(confOb.Proxy); x++ {
+		go func(x int) {
+			// 监听端口
+			ln, err := net.Listen("tcp", confOb.Proxy[x].From)
+			if err != nil {
+				fmt.Println("监听端口出错:", err)
+				return
+			}
+			// 确保监听端口关闭
+			defer ln.Close()
+
+			fmt.Println("服务器已启动，正在监听" + confOb.Proxy[x].From)
+			for {
+				// 接受客户端连接
+				conn, err := ln.Accept()
+				if err != nil {
+					fmt.Println("接受客户端连接出错:", err)
+					continue
+				}
+				// 处理客户端连接
+				go handleConnection(conn, confOb.Proxy[x].To)
+			}
+		}(x)
+	}
+
+	for {
+	}
+}
+
+func handleConnection(conn net.Conn, toServer string) {
 	fmt.Println("接受客户端链接 ok")
 	// 确保连接关闭
 	defer conn.Close()
