@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -57,27 +59,30 @@ func main() {
 		}(x)
 	}
 
-	for {
-	}
+	// 保持主程序运行
+	select {}
 }
 
 func handleConnection(conn net.Conn, toServer string) {
 	fmt.Println("接受客户端链接 ok")
+	// 设置连接超时
+	conn.SetDeadline(time.Now().Add(5 * time.Minute))
 	// 确保连接关闭
 	defer conn.Close()
 
-	// 解析服务器地址
-	serverAddr, err := net.ResolveTCPAddr("tcp", toServer)
-	if err != nil {
-		fmt.Println("解析服务器地址出错:", err)
-		return
-	}
-	// 建立TCP连接
-	serverConn, err := net.DialTCP("tcp", nil, serverAddr)
+	// 建立TCP连接，设置超时
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialer := net.Dialer{}
+	serverConn, err := dialer.DialContext(ctx, "tcp", toServer)
 	if err != nil {
 		fmt.Println("建立TCP连接出错:", err)
 		return
 	}
+
+	// 设置服务器连接超时
+	serverConn.SetDeadline(time.Now().Add(5 * time.Minute))
 	fmt.Println("到服务器建链 ok")
 	// 确保连接关闭
 	defer serverConn.Close()
@@ -96,38 +101,54 @@ func handleConnection(conn net.Conn, toServer string) {
 // buffer pools
 var (
 	SPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 576)
+		New: func() any {
+			b := make([]byte, 576)
+			return &b
 		},
 	} // small buff pool
 	LPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 64*1024+262)
+		New: func() any {
+			b := make([]byte, 64*1024+262)
+			return &b
 		},
 	} // large buff pool for udp
 )
 
 func Transport(rw1, rw2 io.ReadWriter) error {
-	errc := make(chan error, 1)
+	errc := make(chan error, 2) // 改为2，等待两个goroutine都完成
+
 	go func() {
-		b := LPool.Get().([]byte)
+		b := LPool.Get().(*[]byte)
 		defer LPool.Put(b)
 
-		_, err := io.CopyBuffer(rw1, rw2, b)
+		_, err := io.CopyBuffer(rw1, rw2, *b)
 		errc <- err
 	}()
 
 	go func() {
-		b := LPool.Get().([]byte)
+		b := LPool.Get().(*[]byte)
 		defer LPool.Put(b)
 
-		_, err := io.CopyBuffer(rw2, rw1, b)
+		_, err := io.CopyBuffer(rw2, rw1, *b)
 		errc <- err
 	}()
 
-	err := <-errc
-	if err != nil && err != io.EOF {
-		return err
+	// 等待两个goroutine都完成
+	err1 := <-errc
+	err2 := <-errc
+
+	// 如果两个都正常结束或EOF，返回nil
+	if (err1 == nil || err1 == io.EOF) && (err2 == nil || err2 == io.EOF) {
+		return nil
 	}
+
+	// 返回非EOF的错误
+	if err1 != nil && err1 != io.EOF {
+		return err1
+	}
+	if err2 != nil && err2 != io.EOF {
+		return err2
+	}
+
 	return nil
 }
